@@ -21,13 +21,23 @@
  * nothing — no network, no parent, no bridge. So `innerHTML` below is safe for
  * the same reason mermaid's is: the boundary is the guard, not a sanitiser.
  *
- * ## What is still refused before anything gets here
+ * ## This file holds the guards, because it is the only place that can
  *
- * `index.js` turns away macro definitions and KaTeX's `trust`-gated commands
- * (`\href`, `\includegraphics`, …) before an expression reaches this file, and
- * this file sets `trust: false` and a fresh `macros` object per call regardless.
- * Two guards failing differently: one is a rule with a test on it, the other a
- * setting a later refactor would have to go out of its way to change.
+ * `index.js` refuses nothing — GitHub renders macros and so does this, and an
+ * expression GitHub would draw is one this draws. That is only safe because the
+ * two things which make macros dangerous are handled *here*, by construction
+ * rather than by pattern-matching the source:
+ *
+ *   - **a fresh `macros` object on every call**, so a `\gdef` in one equation
+ *     does not exist in the next one. Macros leak through a *shared* store, and
+ *     the way to not share it is to not share it.
+ *   - **`maxExpand`**, KaTeX's own cap on how far a macro may unfold, so a
+ *     three-line expression cannot expand into an enormous one.
+ *
+ * And `trust: false`, which is what keeps `\href`, `\includegraphics` and the
+ * `\html…` commands from producing a link, a remote image or an HTML attribute.
+ * They still *render* — as inert text, the way GitHub renders them — rather
+ * than causing the whole block to refuse to draw.
  */
 import katex from 'katex'
 import katexCss from 'katex-css'
@@ -91,13 +101,18 @@ export function katexOptions() {
     displayMode: true,
     throwOnError: true,
     output: 'htmlAndMathml',
-    // Not a link, not an image, not an HTML attribute — from inside an equation.
+    // Not a link, not an image, not an HTML attribute — from inside an
+    // equation. The command still renders, inertly, as GitHub renders it.
     trust: false,
     strict: false,
-    // A fresh object per call: KaTeX writes `\gdef` into whatever it is handed,
-    // and a shared one would let an equation redefine a symbol for every
-    // equation drawn after it.
+    // A fresh object per call, and the whole reason macros can be allowed at
+    // all: KaTeX writes `\gdef` into whatever store it is handed, so a shared
+    // one would let an equation redefine a symbol for every equation drawn
+    // after it. A new one per call means `\def` works inside an expression and
+    // is gone by the next.
     macros: {},
+    // KaTeX's own cap on macro expansion, so a short expression cannot unfold
+    // into an enormous one.
     maxExpand: 1000,
   }
 }

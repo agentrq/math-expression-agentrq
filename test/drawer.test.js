@@ -55,10 +55,9 @@ describe('ensureStyles', () => {
 
 describe('katexOptions', () => {
   /**
-   * `index.js` refuses `\href` and the macro commands before an expression gets
-   * here, and these settings refuse them again. Two guards failing differently:
-   * one is a rule with a test on it, the other a setting a later refactor would
-   * have to go out of its way to change.
+   * Nothing is refused before an expression reaches the drawer — GitHub renders
+   * macros and trust-gated commands, so this does too. These settings are
+   * therefore the only guards there are, which is why each one has a test.
    */
   it('does not trust the expression it is given', () => {
     expect(katexOptions().trust).toBe(false)
@@ -72,6 +71,10 @@ describe('katexOptions', () => {
     // Not merely equal — a *different* object, or `\gdef` in one equation
     // writes into the store the next equation is rendered with.
     expect(first).not.toBe(second)
+  })
+
+  it('caps how far a macro may unfold', () => {
+    expect(katexOptions().maxExpand).toBe(1000)
   })
 
   it('throws rather than drawing KaTeX\u2019s own error text', () => {
@@ -154,6 +157,30 @@ describe('draw', () => {
     await expect(draw(root, '\\frac{1}{')).rejects.toThrow()
 
     expect(root.querySelector('.katex')).not.toBeNull()
+  })
+
+  /**
+   * Macros are allowed, and this is the test that makes that safe.
+   *
+   * GitHub renders `\def` and `\newcommand`, so this does too rather than
+   * leaving the block as raw text. The danger was never the command — it is a
+   * *shared* macro store, which is how `\gdef` in one message could redefine a
+   * symbol for every equation drawn after it. A fresh store per call is the
+   * whole guard, so it is worth proving rather than asserting.
+   */
+  it('draws a macro defined inside the expression', async () => {
+    await draw(root, '\\def\\R{\\mathbb{R}} \\R')
+
+    expect(root.querySelector('.katex')).not.toBeNull()
+  })
+
+  it('does not let a macro escape into the next equation', async () => {
+    await draw(root, '\\gdef\\alpha{\\text{LEAKED}} \\alpha')
+    // `\alpha` on its own, in a separate draw. If the store were shared this
+    // would render the redefinition instead of the Greek letter.
+    await draw(root, '\\alpha')
+
+    expect(root.textContent).not.toContain('LEAKED')
   })
 
   /**

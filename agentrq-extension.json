@@ -12,23 +12,11 @@
       "key": "workspaces",
       "type": "string",
       "label": "Only these workspaces (comma separated; blank means all)"
-    },
-    {
-      "key": "maxChars",
-      "type": "number",
-      "label": "Longest expression to draw, in characters"
-    },
-    {
-      "key": "tex",
-      "type": "boolean",
-      "label": "Also draw latex and tex blocks (often whole documents, which will not draw)"
     }
   ],
   "provides": {
     "renderers": [
-      "math",
-      "latex",
-      "tex"
+      "math"
     ],
     "drawers": [
       {

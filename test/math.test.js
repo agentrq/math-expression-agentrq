@@ -1,26 +1,15 @@
 import { describe, it, expect } from 'vitest'
 
-import {
-  DEFAULT_MAX_CHARS,
-  GITHUB_LANGUAGE,
-  TEX_LANGUAGES,
-  allowedWorkspaces,
-  appliesTo,
-  apply,
-  isRefused,
-  languages,
-  maxChars,
-  renderBlock,
-  unwrap,
-} from '../index.js'
+import { LANGUAGE, allowedWorkspaces, appliesTo, apply, renderBlock } from '../index.js'
 
 /**
- * This half of the extension draws nothing.
+ * This half decides *whether* an expression is drawn, and deliberately decides
+ * very little else.
  *
- * It decides *whether* an expression is drawn and hands the TeX over; the
- * drawing happens in `src/drawer.js`, inside a sandboxed frame, and is tested
- * separately. So what is worth testing here is the policy: which workspaces,
- * how much expression, which delimiters come off, and what it will not pass on.
+ * GitHub's specification for a ```math fence is "the contents are TeX", and the
+ * thing worth testing here is that nothing has been added to it: no length cap,
+ * no refused commands, no delimiter rewriting. The guards that matter live in
+ * the drawer, where they can be enforced by construction, and are tested there.
  */
 
 const QUADRATIC = 'x = \\frac{-b \\pm \\sqrt{b^2 - 4ac}}{2a}'
@@ -63,183 +52,55 @@ describe('appliesTo', () => {
   })
 })
 
-describe('maxChars', () => {
-  it('has a default worth having', () => {
-    expect(maxChars({})).toBe(DEFAULT_MAX_CHARS)
-    expect(maxChars(undefined)).toBe(DEFAULT_MAX_CHARS)
-  })
-
-  it('takes a number somebody typed', () => {
-    expect(maxChars({ maxChars: 50 })).toBe(50)
-    expect(maxChars({ maxChars: '80' })).toBe(80)
-    expect(maxChars({ maxChars: 12.7 })).toBe(12)
-  })
-
-  // A zero or a negative would refuse every equation, silently, which is not
-  // what anybody means by typing one.
-  it('ignores a limit that would draw nothing', () => {
-    expect(maxChars({ maxChars: 0 })).toBe(DEFAULT_MAX_CHARS)
-    expect(maxChars({ maxChars: -5 })).toBe(DEFAULT_MAX_CHARS)
-    expect(maxChars({ maxChars: 'lots' })).toBe(DEFAULT_MAX_CHARS)
-  })
-})
-
-describe('languages', () => {
-  /**
-   * A ```latex block is as often a whole document as it is an equation, and
-   * KaTeX draws none of a preamble. Claiming it by default would turn readable
-   * source into a block that refuses to render.
-   */
-  it('claims GitHub\u2019s fence and nothing else, by default', () => {
-    expect(languages({})).toEqual([GITHUB_LANGUAGE])
-    expect(languages(undefined)).toEqual(['math'])
-  })
-
-  it('claims the tex fences only when asked', () => {
-    expect(languages({ tex: true })).toEqual(['math', ...TEX_LANGUAGES])
-  })
-})
-
-describe('unwrap', () => {
-  /**
-   * GitHub's ```math fence takes no delimiters — the fence *is* the delimiter.
-   * But almost everyone writing one has just come from a `$$…$$` block and
-   * writes those too, and left alone they typeset as literal dollar signs,
-   * which reads as a mistake in the maths rather than in the markup.
-   */
-  it('takes off the delimiters people write out of habit', () => {
-    expect(unwrap('$$x + 1$$')).toBe('x + 1')
-    expect(unwrap('\\[x + 1\\]')).toBe('x + 1')
-    expect(unwrap('\\(x + 1\\)')).toBe('x + 1')
-    expect(unwrap('$x + 1$')).toBe('x + 1')
-  })
-
-  it('takes off exactly one pair, and trims what is inside', () => {
-    expect(unwrap('  $$  x + 1  $$  ')).toBe('x + 1')
-    // The inner pair is the author's, not a wrapper: taking both off would be
-    // guessing at an expression that says something different.
-    expect(unwrap('$$$x$$$')).toBe('$x$')
-  })
-
-  /**
-   * The case that makes this a rule rather than a `startsWith`/`endsWith`:
-   * `$$a$$ + $$b$$` begins and ends with `$$` without being wrapped in it, and
-   * stripping there would silently change what the equation says.
-   */
-  it('leaves a delimiter alone when it is not a wrapper', () => {
-    expect(unwrap('$$a$$ + $$b$$')).toBe('$$a$$ + $$b$$')
-    expect(unwrap('$a$ + $b$')).toBe('$a$ + $b$')
-  })
-
-  it('leaves an expression with no delimiters exactly as written', () => {
-    expect(unwrap(QUADRATIC)).toBe(QUADRATIC)
-    expect(unwrap('a $ b')).toBe('a $ b')
-  })
-
-  it('leaves a mismatched pair alone', () => {
-    expect(unwrap('\\[x + 1\\)')).toBe('\\[x + 1\\)')
-    expect(unwrap('$$x + 1$')).toBe('$$x + 1$')
-  })
-
-  // A wrapper with nothing in it is an empty expression, which is a thing to
-  // have — and shorter than a wrapper is not a wrapper at all.
-  it('handles a string too short to be wrapped in anything', () => {
-    expect(unwrap('$$')).toBe('')
-    expect(unwrap('$')).toBe('$')
-    expect(unwrap('')).toBe('')
-    expect(unwrap(undefined)).toBe('')
-  })
-})
-
-describe('isRefused', () => {
-  /**
-   * Macros outlive the equation they are written in. KaTeX keeps them in a
-   * `macros` object, and where that object is shared — which is how anyone gets
-   * `\newcommand` to work across a document — `\gdef` writes into it, so one
-   * equation could redefine `\alpha` for every equation drawn after it.
-   */
-  it('refuses a macro definition, in every spelling of it', () => {
-    const macros = [
-      '\\def\\x{1}',
-      '\\gdef\\x{1}',
-      '\\edef\\x{1}',
-      '\\xdef\\x{1}',
-      '\\newcommand{\\x}{1}',
-      '\\renewcommand{\\x}{1}',
-      '\\providecommand{\\x}{1}',
-      '\\newenvironment{x}{}{}',
-      '\\let\\x\\alpha',
-      '\\futurelet\\x\\y',
-      '\\global\\def\\x{1}',
-    ]
-
-    for (const source of macros) expect(isRefused(source), source).toBe(true)
-  })
-
-  /**
-   * KaTeX gates these behind `trust`: a link, a remote image or an HTML
-   * attribute written from inside an equation. A remote image in a message is a
-   * tracking pixel with extra steps.
-   */
-  it('refuses the commands that reach outside the equation', () => {
-    const reaching = [
-      '\\href{https://example.com}{x}',
-      '\\url{https://example.com}',
-      '\\includegraphics{x.png}',
-      '\\htmlClass{x}{y}',
-      '\\htmlId{x}{y}',
-      '\\htmlStyle{color:red}{y}',
-      '\\htmlData{x=1}{y}',
-    ]
-
-    for (const source of reaching) expect(isRefused(source), source).toBe(true)
-  })
-
-  /**
-   * Matched case-sensitively, because TeX is, and matched to a command
-   * boundary. `\definecolor` is not `\def`, and `\Let` is not a command at all
-   * — refusing either would turn away ordinary maths for nothing.
-   */
-  it('does not refuse a longer command that merely starts the same way', () => {
-    expect(isRefused('\\definecolor{c}{RGB}{0,0,0}')).toBe(false)
-    expect(isRefused('\\letter')).toBe(false)
-    expect(isRefused('\\globalize')).toBe(false)
-    expect(isRefused('\\Def')).toBe(false)
-  })
-
-  it('leaves ordinary maths alone', () => {
-    expect(isRefused(QUADRATIC)).toBe(false)
-    expect(isRefused('\\sum_{i=1}^{n} i = \\frac{n(n+1)}{2}')).toBe(false)
-  })
-})
-
 describe('renderBlock', () => {
   it('answers with the TeX, for the drawer to typeset', () => {
     expect(renderBlock(QUADRATIC)).toEqual({ type: 'diagram', format: 'math', source: QUADRATIC })
   })
 
-  it('answers with the expression the author meant, not the delimiters', () => {
-    expect(renderBlock('$$' + QUADRATIC + '$$').source).toBe(QUADRATIC)
+  /**
+   * GitHub's line is that with the fence "you don't need to use `$$`
+   * delimiters" — not that it removes them if you do. Rewriting the expression
+   * would be this extension quietly editing somebody's maths, and the cases
+   * where it guesses wrong change what the equation says.
+   */
+  it('leaves delimiters exactly as they were written', () => {
+    expect(renderBlock('$$x + 1$$').source).toBe('$$x + 1$$')
+    expect(renderBlock('\\[x + 1\\]').source).toBe('\\[x + 1\\]')
+    expect(renderBlock('$$a$$ + $$b$$').source).toBe('$$a$$ + $$b$$')
   })
 
-  it('refuses one longer than it was told to draw', () => {
-    const long = 'x'.repeat(200)
-
-    expect(renderBlock(long, { maxChars: 100 })).toBeNull()
-    expect(renderBlock(long, { maxChars: 500 })).not.toBeNull()
+  /**
+   * No length cap, no refused commands. An expression GitHub would render is
+   * one this draws, and GitHub renders macros — its own documentation says
+   * MathJax "supports a wide range of LaTeX macros". What makes that safe is a
+   * fresh macro store per render, which is the drawer's job and tested there.
+   */
+  it('adds no rules of its own to what GitHub accepts', () => {
+    expect(renderBlock('\\def\\x{1} \\x')).not.toBeNull()
+    expect(renderBlock('\\newcommand{\\R}{\\mathbb{R}} \\R')).not.toBeNull()
+    expect(renderBlock('\\href{https://example.com}{x}')).not.toBeNull()
+    expect(renderBlock('x'.repeat(20000))).not.toBeNull()
   })
 
-  it('refuses an expression that defines macros or reaches outside itself', () => {
-    expect(renderBlock('\\gdef\\alpha{\\beta} \\alpha')).toBeNull()
-    expect(renderBlock('\\href{https://example.com}{click}')).toBeNull()
+  // Trimmed, because the fence's own whitespace is not part of the expression.
+  it('trims the whitespace the fence left behind', () => {
+    expect(renderBlock(`\n  ${QUADRATIC}\n`).source).toBe(QUADRATIC)
   })
 
-  it('has nothing to draw from nothing', () => {
+  /**
+   * An empty fence is the one thing with nothing to draw and nothing to report
+   * either. An expression that will not *parse* is not refused here — it goes
+   * to the drawer, which throws, so the reader sees why rather than a bare code
+   * block saying nothing.
+   */
+  it('has nothing to draw from an empty fence', () => {
     expect(renderBlock('')).toBeNull()
     expect(renderBlock('   \n  ')).toBeNull()
     expect(renderBlock(undefined)).toBeNull()
-    // A pair of delimiters with nothing between them is also nothing.
-    expect(renderBlock('$$$$')).toBeNull()
+  })
+
+  it('hands a broken expression on, rather than refusing it', () => {
+    expect(renderBlock('\\frac{1}{')).not.toBeNull()
   })
 })
 
@@ -253,12 +114,10 @@ describe('apply', () => {
   it('claims the math fence, and nothing else', () => {
     const added = register()
 
+    // Not `latex` or `tex`: GitHub renders neither as maths, and a ```latex
+    // block is as often a whole document as it is an equation.
     expect(added).toHaveLength(1)
-    expect(added[0]).toMatchObject({ id: 'math', language: 'math', label: 'Math' })
-  })
-
-  it('claims the tex fences too, once they are turned on', () => {
-    expect(register({ tex: true }).map((entry) => entry.language)).toEqual(['math', 'latex', 'tex'])
+    expect(added[0]).toMatchObject({ id: LANGUAGE, language: 'math', label: 'Math' })
   })
 
   it('answers a fence with a diagram node', () => {
@@ -269,16 +128,10 @@ describe('apply', () => {
     })
   })
 
-  /**
-   * Nothing drawn is a legitimate answer: AgentRQ leaves the fence as the text
-   * it was, which is exactly what somebody needs in order to see what is wrong
-   * with it. An error would replace a readable code block with a complaint.
-   */
-  it('answers nothing at all for an expression it will not draw', () => {
-    const [entry] = register({ maxChars: 5 })
+  it('answers nothing at all for an empty fence', () => {
+    const [entry] = register()
 
-    expect(entry.run({ source: QUADRATIC })).toBeNull()
-    expect(entry.run({ source: '\\def\\x{1}' })).toBeNull()
+    expect(entry.run({ source: '   ' })).toBeNull()
     expect(entry.run({})).toBeNull()
   })
 
@@ -302,5 +155,38 @@ describe('apply', () => {
 
     expect(module.inject).toEqual(['renderers'])
     expect(module.name).toBe('math')
+  })
+})
+
+describe('the manifest', () => {
+  const manifest = () => import('../agentrq-extension.json', { with: { type: 'json' } })
+
+  it('calls itself what the module calls itself', async () => {
+    const [{ default: json }, module] = await Promise.all([manifest(), import('../index.js')])
+
+    // The name is an address — it is how everything else refers to this
+    // extension — so a module disagreeing with it means half the wiring points
+    // somewhere that does not exist.
+    expect(json.name).toBe(module.name)
+  })
+
+  it('claims the one fence the module registers', async () => {
+    const { default: json } = await manifest()
+
+    expect(json.provides.renderers).toEqual(['math'])
+  })
+
+  it('brings its own drawer, because the host draws no maths', async () => {
+    const { default: json } = await manifest()
+
+    expect(json.provides.drawers).toEqual([{ format: 'math', entry: 'dist/drawer.js' }])
+  })
+
+  it('asks for no MCP tools, because it reads nothing', async () => {
+    const { default: json } = await manifest()
+
+    // This extension is handed the text it renders and needs no access to the
+    // workspace at all. Its install screen shows no permission list.
+    expect(json.mcp).toBeUndefined()
   })
 })

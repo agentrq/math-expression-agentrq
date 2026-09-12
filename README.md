@@ -53,30 +53,41 @@ what stops this installing somewhere it could only fail.
 | Setting | Default | What it does |
 |---|---|---|
 | Only these workspaces | blank | Comma-separated workspace ids. Blank draws equations everywhere; a list draws them in those workspaces and nowhere else. |
-| Longest expression to draw | 4000 characters | A longer one is left as text. The parser runs in the window you are reading in. Characters rather than lines, because an equation is frequently one very long line. |
-| Also draw latex and tex blocks | off | A ```latex block is as often a whole document — `\documentclass`, a preamble, `\begin{document}` — as it is an equation, and KaTeX draws none of that. Off by default so readable source is not turned into a block that refuses to render. |
 
-## Delimiters come off, rather than being required
+That is the only setting, and the short list is the point — see below.
 
-GitHub's ```math fence takes no delimiters — the fence *is* the delimiter. But
-almost everybody writing one has just come from a `$$…$$` block and writes those
-too, and left alone they draw as literal dollar signs in front of the equation,
-which reads as a typo in the maths rather than in the markup.
+## GitHub is the specification, and this does not add to it
 
-So one matched wrapper comes off: `$$…$$`, `\[…\]`, `\(…\)` or `$…$`.
+GitHub's rule for a ```math fence is that the contents are TeX, rendered with
+MathJax. **An expression GitHub would render is one this draws.** There is no
+length cap, no list of refused commands, and no delimiter rewriting, because
+every one of those is a rule somebody has to discover by watching a perfectly
+good equation silently fail to render.
 
-Only when it is unambiguous. `$$a$$ + $$b$$` starts and ends with `$$` without
-being wrapped in it, and stripping there would silently turn two expressions and
-an operator into one nonsense one — so a middle containing the delimiter again
-is left exactly as written.
+Two consequences worth stating outright, because an earlier version of this
+extension got both wrong:
+
+**Delimiters are left exactly as written.** GitHub says that with the fence "you
+don't need to use `$$` delimiters" — not that it strips them if you do. So
+`$$x$$` inside a fence renders with its dollar signs, the way it does on GitHub.
+Stripping them would be this extension quietly editing somebody's maths, and it
+guesses wrong on the cases that matter: `$$a$$ + $$b$$` is two expressions and
+an operator, not one expression in dollar signs.
+
+**Macros are not refused.** GitHub's own documentation says MathJax "supports a
+wide range of LaTeX macros", and `\def` inside an expression is ordinary TeX
+people really write. See below for what makes that safe.
+
+**Only the `math` fence is claimed** — not `latex` or `tex`, which GitHub does
+not render as maths either.
 
 ## How this draws, and where
 
 The extension is two halves, either side of a boundary.
 
-`index.js` is **policy**, and runs beside the app: which workspaces, how much
-expression, which delimiters come off, what is refused. It answers with the
-equation's *TeX* and never with markup.
+`index.js` is **scope**, and runs beside the app: which workspaces this applies
+to, and nothing else. It answers with the equation's *TeX* and never with
+markup.
 
 `src/drawer.js` is **typesetting**, and runs nowhere near the app. AgentRQ 0.6
 gives an extension a sandboxed frame with an opaque origin and this policy:
@@ -109,16 +120,16 @@ the woff2 every time — that is 800 KB not shipped. The bundle is **621 KB**,
 served from a URL and cached once by the browser rather than handed to each
 frame.
 
-## What is refused before it is ever drawn
+## Nothing is refused — so the guards are structural
 
-### Macro definitions are refused
+Since no expression is turned away for what it *says*, the safety has to come
+from how KaTeX is called. It does, and each of these has a test on it.
 
-`\def`, `\gdef`, `\edef`, `\xdef`, `\newcommand`, `\renewcommand`,
-`\providecommand`, `\newenvironment`, `\let`, `\futurelet`, `\global`.
+### Macros are allowed, and cannot escape their equation
 
 KaTeX keeps macros in a `macros` object, and where that object is shared between
-renders — which is how anyone gets `\newcommand` to work across a document —
-`\gdef` writes into it. Checked against KaTeX 0.16.47 rather than assumed:
+renders — which is how anyone gets `\newcommand` to work across a whole document
+— `\gdef` writes into it. Checked against KaTeX 0.16.47 rather than assumed:
 
 ```js
 const macros = {}
@@ -126,52 +137,50 @@ katex.renderToString('\\gdef\\alpha{\\text{PWNED}} \\alpha', { macros })
 katex.renderToString('\\alpha', { macros })   // → PWNED
 ```
 
-One equation, in one message, redefining `\alpha` for every equation drawn after
-it in that window. Macros are also how a small expression becomes an enormous
-one; KaTeX caps expansion at `maxExpand`, and this is the second guard.
+That is one equation, in one message, redefining `\alpha` for every equation
+drawn after it in that window. The fix is not to ban `\def` — GitHub renders it,
+and so should this — it is simply to **not share the store**. The drawer builds
+a fresh one on every call, so `\def` works inside an expression and is gone by
+the next one. `maxExpand` caps how far a macro may unfold, so a short expression
+cannot become an enormous one.
 
-### `\href`, `\url`, `\includegraphics` and the `\html…` commands are refused
+### `\href`, `\includegraphics` and the `\html…` commands render inertly
 
-KaTeX gates these behind its `trust` option: a link, a remote image, or an HTML
-attribute, written from inside an equation. A remote image in a message is a
-tracking pixel with extra steps.
+The drawer sets `trust: false`, KaTeX's default and the setting that gates
+exactly these. Verified against 0.16.47: `\href` produces no anchor element, and
+`\includegraphics` produces no `<img>` and nothing carrying a `src` — KaTeX
+renders the command name in its error colour instead. A remote image in a
+message is a tracking pixel with extra steps, and none is ever loaded.
 
-The drawer sets `trust: false`, which is already enough — verified against
-0.16.47 rather than assumed. `\href` produces no anchor element, and
-`\includegraphics` produces no `<img>` and nothing carrying a `src`; KaTeX
-renders the command name in its error colour instead. Note that an untrusted
-command does **not** throw: `throwOnError` is about TeX that will not parse, and
-these parse fine.
+Note that an untrusted command does **not** throw: `throwOnError` is about TeX
+that will not parse, and these parse fine. So the block still renders, the way
+it does on GitHub, rather than refusing to draw.
 
 The URL text does still appear in the output, inside the MathML `<annotation>`
-element — that is the source echoed back for screen readers and copy-paste, and
-it fetches nothing. Worth knowing, because it means a `.includes('javascript:')`
-check on the output returns true for an expression that was correctly refused.
+element — the source echoed back for screen readers and copy-paste, which
+fetches nothing. Worth knowing, because it means a `.includes('javascript:')`
+check on the output returns true for an expression that was handled correctly.
 The tests here query for the `<a>` element instead.
 
-Refusing the commands in `index.js` as well makes two guards that fail
-differently: one is configuration a later refactor could change, the other is a
-rule with a test on it.
+### An expression that will not parse is not a refusal
 
-### Near misses are not refused
-
-`\left`, `\deg`, `\urcorner` and the rest merely *start* like a refused command.
-Matching is case-sensitive, because TeX is, and bounded on the command name, so
-`\left( x \right)` draws — which most real equations depend on.
-
-### A refusal is not an error
-
-The block stays as the text it was, which is exactly what somebody needs in
-order to see what is wrong with it. Replacing a readable code block with a
-complaint about it helps nobody.
+It is an error, and it is reported as one: the drawer throws, and AgentRQ shows
+the reason with the TeX underneath it — which is what whoever wrote the equation
+needs in order to fix it. An empty fence is the one case that draws nothing at
+all, because there is no equation and nothing to report either.
 
 ## Where an equation comes from
 
 Usually not from the person reading it. A math block in AgentRQ was typically
 written by an agent, or pasted out of an issue, or assembled from a webhook
-payload. That is why the source is refused rather than sanitised, why KaTeX is
-configured before it can be asked to draw, and why the drawing happens somewhere
-that can reach nothing.
+payload.
+
+That is an argument for the guards being *structural* rather than a list of
+banned commands. Untrusted input is exactly the case where a blocklist is worth
+least — it has to be complete to work, and a list nobody can prove complete is a
+list that gets trusted anyway. So the expression is drawn somewhere that can
+reach nothing, with a renderer configured before it is handed anything, and the
+equation is free to say whatever it likes in there.
 
 ## Developing
 
