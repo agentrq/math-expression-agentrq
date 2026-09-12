@@ -1,0 +1,37 @@
+{
+  "name": "@agentrq/math-expression-agentrq",
+  "version": "1.0.0",
+  "description": "AgentRQ extension: draws ```math blocks in tasks and messages as typeset equations.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "main": "index.js",
+  "files": [
+    "index.js",
+    "dist",
+    "agentrq-extension.json",
+    "README.md"
+  ],
+  "scripts": {
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "build": "node scripts/build.mjs",
+    "prepack": "npm run build"
+  },
+  "devDependencies": {
+    "@vitest/coverage-v8": "^3.2.7",
+    "esbuild": "^0.28.2",
+    "happy-dom": "^20.0.0",
+    "vitest": "^3.2.7"
+  },
+  "keywords": [
+    "agentrq",
+    "agentrq-extension",
+    "math",
+    "latex",
+    "katex",
+    "equations"
+  ],
+  "dependencies": {
+    "katex": "^0.16.0"
+  }
+}

@@ -1,0 +1,45 @@
+{
+  "name": "math",
+  "displayName": "Math Expressions",
+  "version": "1.0.0",
+  "description": "Draws math code blocks in tasks and messages as typeset equations, the way GitHub does, with a toggle back to the TeX.",
+  "license": "Apache-2.0",
+  "engines": {
+    "agentrq": ">=0.6"
+  },
+  "config": [
+    {
+      "key": "workspaces",
+      "type": "string",
+      "label": "Only these workspaces (comma separated; blank means all)"
+    },
+    {
+      "key": "maxChars",
+      "type": "number",
+      "label": "Longest expression to draw, in characters"
+    },
+    {
+      "key": "tex",
+      "type": "boolean",
+      "label": "Also draw latex and tex blocks (often whole documents, which will not draw)"
+    }
+  ],
+  "provides": {
+    "renderers": [
+      "math",
+      "latex",
+      "tex"
+    ],
+    "drawers": [
+      {
+        "format": "math",
+        "entry": "dist/drawer.js"
+      }
+    ]
+  },
+  "artifact": {
+    "release": "v1.0.0",
+    "asset": "math-expression-agentrq-1.0.0.tgz",
+    "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+  }
+}
