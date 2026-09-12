@@ -1,7 +1,7 @@
 {
   "name": "math",
   "displayName": "Math Expressions",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Draws math code blocks in tasks and messages as typeset equations, the way GitHub does, with a toggle back to the TeX.",
   "license": "Apache-2.0",
   "engines": {
@@ -26,8 +26,8 @@
     ]
   },
   "artifact": {
-    "release": "v1.0.1",
-    "asset": "math-expression-agentrq-1.0.1.tgz",
-    "sha256": "d954f4fe6e1836a0f4f52d67fe3de42c90ed949bd2d944638f39ed23061a1b3a"
+    "release": "v1.0.2",
+    "asset": "math-expression-agentrq-1.0.2.tgz",
+    "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
   }
 }

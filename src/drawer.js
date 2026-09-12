@@ -43,6 +43,94 @@ import katex from 'katex'
 import katexCss from 'katex-css'
 
 /**
+ * Makes a copied equation paste as its TeX.
+ *
+ * Imported for its side effect, which is the whole of what it is: it registers
+ * one `copy` listener on this document, and when the selection covers an
+ * equation it rewrites the clipboard's plain-text to the source out of the
+ * MathML `<annotation>`.
+ *
+ * Without it, selecting an equation and copying gives you KaTeX's *visual*
+ * layer — the positioned glyphs, in reading order if you are lucky — which is
+ * not TeX, not the equation, and not anything you can paste back into a message
+ * and have render. The maths is in the document twice on purpose, once to look
+ * at and once to mean something, and this decides which one the clipboard gets.
+ *
+ * The block's **Text** toggle still shows the exact source for reading. This is
+ * for the much more common gesture of selecting the equation itself.
+ */
+import 'katex/contrib/copy-tex'
+
+/** The delimiters `copy-tex` wraps its output in, display first. */
+const COPIED_WRAPPER = /^\$\$([\s\S]*)\$\$$|^\$([\s\S]*)\$$/
+
+/**
+ * An unescaped dollar, for testing rather than replacing.
+ *
+ * Deliberately *not* the `/g` pattern used to escape them: `test` on a global
+ * regex advances `lastIndex` and the next call starts from wherever the last
+ * one stopped, so alternate calls with the same string disagree.
+ */
+const HAS_BARE_DOLLAR = /(?<!\\)\$/
+
+/**
+ * Takes `copy-tex`'s delimiters back off, because they render nowhere here.
+ *
+ * `copy-tex` wraps what it copies in `$…$` so the text pastes into a markdown
+ * document as inline maths. That is right for GitHub and wrong for AgentRQ,
+ * which has **no inline maths at all** — the markdown splitter only cuts on
+ * fences, so `$x$` in a message is three literal characters and an `x`.
+ *
+ * So the delimiters are noise in every place the text can land here, and worse
+ * than noise in the one that matters: paste a copied equation into a ```math
+ * fence and the dollars are drawn, because this extension now draws them. Copy
+ * and paste would not round-trip.
+ *
+ * Registered after `copy-tex`, so it runs second on the same event and edits
+ * what that handler just wrote. Anything it does not recognise is left alone.
+ */
+export function unwrapCopiedTex(text) {
+  const match = COPIED_WRAPPER.exec(text)
+  if (!match) return text
+
+  // Whichever group matched: `$$…$$` is tried first, so a display equation is
+  // not unwrapped as an inline one with stray dollars left over.
+  const inner = (match[1] ?? match[2]).trim()
+
+  // A delimiter still loose inside means this was never a wrapper. `$a$ + $b$`
+  // begins and ends with `$` without being wrapped in it, and unwrapping gives
+  // `a$ + $b`, which is not an equation at all. This is the exact mistake the
+  // extension's original delimiter-stripping made, and the one guard it got
+  // right — an escaped `\$` is a dollar sign the author wrote, not a delimiter.
+  if (HAS_BARE_DOLLAR.test(inner)) return text
+
+  return inner
+}
+
+/**
+ * Edits what `copy-tex` just put on the clipboard.
+ *
+ * Named and exported rather than written inline at the `addEventListener`,
+ * because a handler that cannot be called in a test is a handler whose early
+ * returns are never checked — and those are the paths that run when a copy has
+ * nothing to do with an equation.
+ */
+export function rewriteCopiedTex(event) {
+  const clipboardData = event?.clipboardData
+  if (!clipboardData) return
+
+  const copied = clipboardData.getData('text/plain')
+  if (!copied) return
+
+  const unwrapped = unwrapCopiedTex(copied)
+  if (unwrapped !== copied) clipboardData.setData('text/plain', unwrapped)
+}
+
+// Second, after `copy-tex`'s own listener: handlers on the same target run in
+// the order they were added, so this sees the text that one wrote.
+document.addEventListener('copy', rewriteCopiedTex)
+
+/**
  * KaTeX's stylesheet, added once per document.
  *
  * `adoptedStyleSheets` would be tidier, but the CSS carries 400 KB of inlined
