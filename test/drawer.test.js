@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 
-import draw, { ensureStyles, fontsReady, katexOptions } from '../src/drawer.js'
+import draw, { ensureStyles, escapeDollars, fontsReady, katexOptions } from '../src/drawer.js'
 
 /**
  * The drawer is the half that produces markup, so this is where the claims
@@ -83,6 +83,40 @@ describe('katexOptions', () => {
   })
 })
 
+describe('escapeDollars', () => {
+  /**
+   * GitHub renders with MathJax, which treats `$` inside a math block as an
+   * ordinary character and draws it. KaTeX refuses the same input outright, so
+   * without this a `$$…$$` block — a habit people bring from every other
+   * markdown editor — fails to draw at all.
+   */
+  it('escapes a bare dollar so KaTeX draws it instead of refusing', () => {
+    expect(escapeDollars('$$a^2$$')).toBe('\\$\\$a^2\\$\\$')
+    expect(escapeDollars('x = 5$')).toBe('x = 5\\$')
+  })
+
+  /**
+   * The reason this uses a lookbehind. With `/(^|[^\\])\$/g` the character
+   * before each `$` is consumed, so in `$$` the second one is never matched and
+   * the expression still fails — which is exactly the input this exists for.
+   */
+  it('escapes both halves of a doubled delimiter', () => {
+    expect(escapeDollars('$$')).toBe('\\$\\$')
+    expect(escapeDollars('$$a$$ + $$b$$')).toBe('\\$\\$a\\$\\$ + \\$\\$b\\$\\$')
+  })
+
+  it('leaves an already-escaped dollar alone', () => {
+    // Escaping it twice would draw a backslash next to the dollar sign.
+    expect(escapeDollars('a \\$ b')).toBe('a \\$ b')
+    expect(escapeDollars('\\text{cost: \\$5}')).toBe('\\text{cost: \\$5}')
+  })
+
+  it('leaves an expression with no dollars untouched', () => {
+    expect(escapeDollars('\\frac{1}{2}')).toBe('\\frac{1}{2}')
+    expect(escapeDollars('')).toBe('')
+  })
+})
+
 describe('fontsReady', () => {
   it('waits for the fonts when the document can say', async () => {
     let settled = false
@@ -157,6 +191,24 @@ describe('draw', () => {
     await expect(draw(root, '\\frac{1}{')).rejects.toThrow()
 
     expect(root.querySelector('.katex')).not.toBeNull()
+  })
+
+  /**
+   * The bug testing found: this block used to throw rather than draw.
+   *
+   * `$$…$$` inside a ```math fence is what people write out of habit. GitHub
+   * draws it — the equation, with the dollar signs visible at both ends — and
+   * now so does this.
+   */
+  it('draws an expression somebody wrapped in dollar signs', async () => {
+    await draw(root, '$$a^2 + b^2 = c^2$$')
+
+    expect(root.querySelector('.katex')).not.toBeNull()
+    // The dollars are drawn, not silently deleted: four of them, as written.
+    // An earlier version of this extension stripped them, which changed what
+    // `$$a$$ + $$b$$` said.
+    const visible = root.querySelector('.katex-html')
+    expect(visible.textContent.match(/\$/g)).toHaveLength(4)
   })
 
   /**

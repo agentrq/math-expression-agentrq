@@ -67,12 +67,22 @@ good equation silently fail to render.
 Two consequences worth stating outright, because an earlier version of this
 extension got both wrong:
 
-**Delimiters are left exactly as written.** GitHub says that with the fence "you
-don't need to use `$$` delimiters" — not that it strips them if you do. So
-`$$x$$` inside a fence renders with its dollar signs, the way it does on GitHub.
+**Delimiters are left exactly as written, and drawn.** GitHub says that with the
+fence "you don't need to use `$$` delimiters" — not that it strips them if you
+do. Checked against MathJax, the engine GitHub renders with: `$$a^2+b^2=c^2$$`
+draws the equation *with the dollar signs visible at both ends*. So that is what
+this draws too.
+
 Stripping them would be this extension quietly editing somebody's maths, and it
 guesses wrong on the cases that matter: `$$a$$ + $$b$$` is two expressions and
 an operator, not one expression in dollar signs.
+
+This costs one line of engine compensation, in the drawer. KaTeX and MathJax
+disagree here — KaTeX refuses a bare `$` outright with *"Can't use function '$'
+in math mode"*, which would make a block anybody writes out of habit fail to
+draw. So a bare `$` is escaped to `\$` before KaTeX sees it, which is simply how
+a literal dollar is written in TeX. Nothing is removed and no expression is
+rewritten to mean something else.
 
 **Macros are not refused.** GitHub's own documentation says MathJax "supports a
 wide range of LaTeX macros", and `\def` inside an expression is ordinary TeX
