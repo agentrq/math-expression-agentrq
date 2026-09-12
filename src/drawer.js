@@ -118,6 +118,43 @@ export function katexOptions() {
 }
 
 /**
+ * A dollar sign that is not already escaped.
+ *
+ * Lookbehind rather than a captured preceding character, because `$$` is the
+ * whole point and consecutive matches overlap: `/(^|[^\\])\$/g` consumes the
+ * character before each `$`, so in `$$` the second one is never matched and the
+ * expression still fails.
+ */
+const BARE_DOLLAR = /(?<!\\)\$/g
+
+/**
+ * Makes a bare `$` into a dollar sign, because that is what GitHub draws.
+ *
+ * GitHub renders with MathJax, which treats a `$` inside a math block as an
+ * ordinary character — `$$a^2+b^2=c^2$$` draws the equation with visible dollar
+ * signs at both ends. KaTeX refuses the same input outright: *"Can't use
+ * function '$' in math mode"*. Verified against both engines rather than
+ * reasoned about, because the guess went the other way the first time.
+ *
+ * That matters more than it looks. Writing `$$…$$` inside a ```math fence is a
+ * habit people bring from every other markdown editor, and without this the
+ * block fails to draw at all.
+ *
+ * **This is not the delimiter-stripping this extension used to do.** Nothing is
+ * removed and the expression is not rewritten to mean something else — the
+ * dollars stay, and are drawn, exactly as GitHub draws them. An escape is how
+ * you write a literal `$` in TeX; this writes it for the author.
+ *
+ * Known edge: `\\$` — a TeX line break immediately followed by a dollar — is
+ * left alone, because the lookbehind sees the second backslash. It is the one
+ * input where KaTeX still refuses and MathJax does not, and rare enough to be
+ * worth less than the complexity of counting backslashes.
+ */
+export function escapeDollars(text) {
+  return text.replace(BARE_DOLLAR, '\\$')
+}
+
+/**
  * Waits for the inlined fonts, when the document can say.
  *
  * The frame measures the height the moment `draw` resolves. KaTeX's metrics
@@ -151,7 +188,7 @@ export default async function draw(root, source) {
   // `renderToString` rather than `katex.render`, so a failed parse throws
   // before the old equation is cleared: a block that fails to redraw keeps
   // showing the last thing that worked until the frame replaces it.
-  const html = katex.renderToString(text, katexOptions())
+  const html = katex.renderToString(escapeDollars(text), katexOptions())
 
   const box = doc.createElement('div')
   // The one place `innerHTML` is right: this document is the sandbox, and the
