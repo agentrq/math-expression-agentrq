@@ -1,6 +1,13 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 
-import draw, { ensureStyles, escapeDollars, fontsReady, katexOptions } from '../src/drawer.js'
+import draw, {
+  ensureStyles,
+  escapeDollars,
+  fontsReady,
+  katexOptions,
+  rewriteCopiedTex,
+  unwrapCopiedTex,
+} from '../src/drawer.js'
 
 /**
  * The drawer is the half that produces markup, so this is where the claims
@@ -117,6 +124,72 @@ describe('escapeDollars', () => {
   })
 })
 
+describe('unwrapCopiedTex', () => {
+  /**
+   * `copy-tex` wraps what it copies in `$…$`, which is right for GitHub and
+   * wrong here: AgentRQ has no inline maths, so the delimiters render nowhere,
+   * and pasting into a ```math fence would draw them as dollar signs — copy and
+   * paste would not round-trip.
+   */
+  it('takes off the delimiters copy-tex adds', () => {
+    expect(unwrapCopiedTex('$x + 1$')).toBe('x + 1')
+    expect(unwrapCopiedTex('$$x + 1$$')).toBe('x + 1')
+  })
+
+  // `$$` first, or a display equation is unwrapped as an inline one and a
+  // stray dollar is left at each end.
+  it('prefers the display delimiters over the inline ones', () => {
+    expect(unwrapCopiedTex('$$a$$')).toBe('a')
+  })
+
+  it('leaves text it does not recognise alone', () => {
+    expect(unwrapCopiedTex('x + 1')).toBe('x + 1')
+    expect(unwrapCopiedTex('$a$ + $b$')).toBe('$a$ + $b$')
+    expect(unwrapCopiedTex('')).toBe('')
+  })
+})
+
+describe('rewriteCopiedTex', () => {
+  const clipboard = (text) => {
+    const store = { 'text/plain': text }
+    return {
+      getData: (type) => store[type] ?? '',
+      setData: (type, value) => { store[type] = value },
+      read: () => store['text/plain'],
+    }
+  }
+
+  it('rewrites a wrapped equation to bare TeX', () => {
+    const clipboardData = clipboard('$$x + 1$$')
+    rewriteCopiedTex({ clipboardData })
+
+    expect(clipboardData.read()).toBe('x + 1')
+  })
+
+  /**
+   * The paths that run every time somebody copies anything at all that is not
+   * an equation. They have to do nothing, quietly.
+   */
+  it('does nothing to a copy with no clipboard to edit', () => {
+    expect(() => rewriteCopiedTex({})).not.toThrow()
+    expect(() => rewriteCopiedTex(undefined)).not.toThrow()
+  })
+
+  it('does nothing when nothing was copied', () => {
+    const clipboardData = clipboard('')
+    rewriteCopiedTex({ clipboardData })
+
+    expect(clipboardData.read()).toBe('')
+  })
+
+  it('leaves ordinary copied text exactly as it was', () => {
+    const clipboardData = clipboard('some prose about $ and things')
+    rewriteCopiedTex({ clipboardData })
+
+    expect(clipboardData.read()).toBe('some prose about $ and things')
+  })
+})
+
 describe('fontsReady', () => {
   it('waits for the fonts when the document can say', async () => {
     let settled = false
@@ -191,6 +264,34 @@ describe('draw', () => {
     await expect(draw(root, '\\frac{1}{')).rejects.toThrow()
 
     expect(root.querySelector('.katex')).not.toBeNull()
+  })
+
+  /**
+   * Copying an equation should give you the TeX back.
+   *
+   * KaTeX puts the maths in the document twice: a visual layer of positioned
+   * glyphs, and MathML carrying the source in an `<annotation>`. Copy the
+   * selection and you get the visual layer — not TeX, not the equation, and not
+   * something that renders if you paste it back. `copy-tex` rewrites the
+   * clipboard's plain text to the source, and this proves it, by actually
+   * selecting the equation and dispatching a copy.
+   */
+  it('copies as the TeX that was written, not the glyphs', async () => {
+    await draw(root, QUADRATIC)
+
+    const selection = window.getSelection()
+    const range = document.createRange()
+    range.selectNodeContents(root.querySelector('.katex'))
+    selection.removeAllRanges()
+    selection.addRange(range)
+
+    const clipboardData = new window.DataTransfer()
+    const event = new window.ClipboardEvent('copy', { clipboardData, bubbles: true, cancelable: true })
+    document.dispatchEvent(event)
+
+    // Bare TeX: exactly what was written, and what pastes back into a ```math
+    // fence and draws the same equation again.
+    expect(clipboardData.getData('text/plain')).toBe(QUADRATIC)
   })
 
   /**

@@ -130,6 +130,31 @@ the woff2 every time — that is 800 KB not shipped. The bundle is **621 KB**,
 served from a URL and cached once by the browser rather than handed to each
 frame.
 
+## Copying an equation gives you the TeX
+
+Select a drawn equation, copy it, and you get back the source that produced it —
+not the glyphs.
+
+That needs saying because the default is worse than it sounds. KaTeX puts the
+maths in the document twice: a visual layer of positioned spans, and MathML
+carrying the source in an `<annotation>`. Copy the selection and the clipboard
+takes the visual layer, which is not TeX, not the equation, and not anything
+that renders if you paste it back.
+
+KaTeX's `copy-tex` fixes that, and this bundles it — with one change. `copy-tex`
+wraps what it copies in `$…$` so the text pastes into a markdown document as
+inline maths. That is right for GitHub and wrong here: **AgentRQ has no inline
+maths at all**, so those delimiters render nowhere, and pasting a copied
+equation into a ```` ```math ```` fence would draw them as dollar signs. Copy and
+paste would not round-trip. So the delimiters come back off, and what you get is
+exactly what you would have typed.
+
+Only when it is unambiguous — `$a$ + $b$` begins and ends with a dollar without
+being wrapped in one, and is left alone.
+
+The block's **Text** toggle is still there, and still shows the exact source.
+This is for the more common gesture of just selecting the equation.
+
 ## Nothing is refused — so the guards are structural
 
 Since no expression is turned away for what it *says*, the safety has to come
